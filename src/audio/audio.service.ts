@@ -2,8 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ProcessAudioDto } from './dto/process-audio.dto';
 import OpenAI from 'openai';
-import { Readable } from 'stream';
-import { AudioResponse } from './interfaces/audio-response.interface';
+import { AudioResponse } from './entities/audio-response.interface';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AudioService {
@@ -17,7 +20,7 @@ export class AudioService {
 
   async processAudio(processAudioDto: ProcessAudioDto): Promise<AudioResponse> {
     const { audio, language } = processAudioDto;
-    
+
     // Transcrição de áudio
     const transcription = await this.transcribeAudio(audio, language);
 
@@ -31,10 +34,16 @@ export class AudioService {
     file: Express.Multer.File,
     language?: string,
   ): Promise<string> {
-    const audioReadStream = Readable.from(file.buffer);
+    const tempFilePath = path.join(
+      os.tmpdir(),
+      `${uuidv4()}-${file.originalname || 'audio.mp3'}`,
+    );
+    await fs.promises.writeFile(tempFilePath, file.buffer);
+
+    const fileStream = fs.createReadStream(tempFilePath);
 
     const response = await this.openai.audio.transcriptions.create({
-      file: audioReadStream,
+      file: fileStream,
       model: 'whisper-1',
       language: language || 'pt',
       response_format: 'text',
@@ -48,13 +57,14 @@ export class AudioService {
       messages: [
         {
           role: 'system',
-          content: 'You are a helpful assistant. Respond in the same language as the user input.',
+          content:
+            'You are a helpful assistant. Respond in the same language as the user input.',
         },
         { role: 'user', content: prompt },
       ],
       model: 'gpt-3.5-turbo',
     });
 
-    return completion.choices[0].message.content;
+    return completion.choices[0].message.content || '';
   }
 }
